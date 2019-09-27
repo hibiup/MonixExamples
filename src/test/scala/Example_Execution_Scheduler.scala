@@ -1,12 +1,20 @@
+import java.util.concurrent.RejectedExecutionException
+
 import com.typesafe.scalalogging.StrictLogging
+import monix.execution.schedulers.SchedulerService
 import org.scalatest.FlatSpec
 
+import scala.concurrent.Await
+
+
 /**
+ * Execution 作为 Monix 的一个子项目，负责管理多任务执行环境，包括任务执行器Scheduler，
+ *
  * https://monix.io/docs/3x/execution/scheduler.html
  *
  * Monix 的 Scheduler 相比 Scala ExecutionContext, 它允许：延时、重复计算，并且允许返回一个可终止运算的句柄。
  */
-class Example_2_Scheduler extends FlatSpec with StrictLogging {
+class Example_Execution_Scheduler extends FlatSpec with StrictLogging {
     import java.util.concurrent.TimeUnit
 
     "Monix Scheduler works with Scala Future" should "" in {
@@ -104,5 +112,89 @@ class Example_2_Scheduler extends FlatSpec with StrictLogging {
         // 再次触发，给予一个模拟的一秒信号量
         testScheduler.tick(1.second)
         // => Delayed execution!
+    }
+
+    "Execution Model" should "" in {
+        /**
+         * 定制 Monix Scheduler：
+         *
+         * onix Scheduler 支持三种执行模式：
+         *
+         *   BatchedExecution：批量模式，模式内任务以同步模式执行，强制异步边界。该模式的缺省任务数是 1024 个，以下 jvm 参数可以修改该值：
+         *     java -Dmonix.environment.batchSize=256
+         *
+         *   AlwaysAsyncExecution：总是以异步执行所有任务，相当于 Scala 的 Future
+         *
+         *   SynchronousExecution：总是同步执行。
+         */
+
+         /**
+          * 1） 基于 Java 的 Executor 来构建，构建的时候可以结合以上执行模式:
+          */
+        import java.util.concurrent.Executors
+        import monix.execution.ExecutionModel.AlwaysAsyncExecution
+        import monix.execution.{Scheduler, UncaughtExceptionReporter}
+
+        /**
+         * 任务分配执行器（java.util.concurrent.ScheduledExecutorService）。缺省是单线程 newSingleThreadScheduledExecutor，
+         * 因为它只负责分配任务，并不实际执行任务
+         * */
+        lazy val scheduledExecutor = Executors.newSingleThreadScheduledExecutor()
+
+        /**
+         * 实际任务执行器, 缺省是 ForkJoinPool.
+         * */
+        lazy val executorService = scala.concurrent.ExecutionContext.Implicits.global
+
+        // UncaughtExceptionReporter 收集异步任务中的异常，打印到标准输出。（可选参数）
+        lazy val uncaughtExceptionReporter = UncaughtExceptionReporter(executorService.reportFailure)
+
+        lazy val scheduler: Scheduler = Scheduler(
+            scheduledExecutor, // （可选）
+            executorService,
+            uncaughtExceptionReporter, // （可选）
+            AlwaysAsyncExecution  // （可选）
+        )
+        scheduler.execute(() => println(s"Hello, ${scheduler.source}!"))
+
+        /**
+         * 2）定制 ForkJoinPool 制定大小.
+         *
+         * SchedulerService 是 Scheduler 的子类, 提供了关闭（termination）Scheduler 的功能。
+         */
+        lazy val forkJoinPoolScheduler: SchedulerService =
+            Scheduler.computation(
+                parallelism = 10,
+                executionModel = AlwaysAsyncExecution
+            )
+        forkJoinPoolScheduler.execute(() => println(s"Hello, ${forkJoinPoolScheduler.source}!"))
+
+        import scala.concurrent.duration._
+        import monix.execution.Scheduler.global
+        val termination = forkJoinPoolScheduler.awaitTermination(30.seconds, global)  // awaitTermination 本身也是异步的
+        Await.result(termination, Duration.Inf)
+
+        // 关闭后的 Scheduler 不接受新任务
+        logger.info(s"Scheduler is shutdown: ${forkJoinPoolScheduler.isShutdown}")
+        try
+            forkJoinPoolScheduler.execute(() => println(s"Hello, ${forkJoinPoolScheduler.source}!"))
+        catch {
+            case e: RejectedExecutionException => e.printStackTrace()
+        }
+
+        /**
+         * 3) 创建一个基于IO绑定无限制线程池的 Scheduler
+         * */
+        lazy val unboundedScheduler = Scheduler.io(name="my-io")
+
+        /**
+         * 4) 单线程池 Scheduler
+         */
+        lazy val singleThreadScheduler = Scheduler.singleThread(name="my-thread")
+
+        /**
+         * 5) Trampoline scheduler
+         */
+        lazy val trampolineScheduler = Scheduler.trampoline(executionModel=AlwaysAsyncExecution)
     }
 }
