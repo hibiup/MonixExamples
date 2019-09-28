@@ -14,7 +14,7 @@ import scala.concurrent.Await
  *
  * Monix 的 Scheduler 相比 Scala ExecutionContext, 它允许：延时、重复计算，并且允许返回一个可终止运算的句柄。
  */
-class Example_Execution_Scheduler extends FlatSpec with StrictLogging {
+class Example_Execution_1_Scheduler extends FlatSpec with StrictLogging {
     import java.util.concurrent.TimeUnit
 
     "Monix Scheduler works with Scala Future" should "" in {
