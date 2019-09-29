@@ -167,19 +167,32 @@ class Example_Execution_1_Scheduler extends FlatSpec with StrictLogging {
                 parallelism = 10,
                 executionModel = AlwaysAsyncExecution
             )
-        forkJoinPoolScheduler.execute(() => println(s"Hello, ${forkJoinPoolScheduler.source}!"))
+        forkJoinPoolScheduler.execute(() => {
+            Thread.sleep(3000)
+            println(s"Hello, ${forkJoinPoolScheduler.source}!")
+        })
 
         import scala.concurrent.duration._
         import monix.execution.Scheduler.global
-        val termination = forkJoinPoolScheduler.awaitTermination(30.seconds, global)  // awaitTermination 本身也是异步的
-        Await.result(termination, Duration.Inf)
+        /**
+         * shutdown 不会终止正在执行中的任务，因此终止过程也许不会立刻完成。如果我们希望 scheduler 彻底终止后在继续，则需要
+         * 调用 awaitTermination. awaitTermination 并不会调用 shutdown, 它唯一的作用就是等待 shutdown 完成或超时。
+         */
+        logger.info("Trying to shutdown scheduler")
+        forkJoinPoolScheduler.shutdown()
+        logger.info("Shutdown request has been submitted")
+        // awaitTermination 本身也是异步的
+        val termination = forkJoinPoolScheduler.awaitTermination(30.seconds, global)
+        Await.result(termination, Duration.Inf) match {
+            case true => logger.info("Scheduler has been shutdown.")
+        }
 
         // 关闭后的 Scheduler 不接受新任务
         logger.info(s"Scheduler is shutdown: ${forkJoinPoolScheduler.isShutdown}")
         try
             forkJoinPoolScheduler.execute(() => println(s"Hello, ${forkJoinPoolScheduler.source}!"))
         catch {
-            case e: RejectedExecutionException => e.printStackTrace()
+            case e: RejectedExecutionException => logger.info(e.getMessage)
         }
 
         /**

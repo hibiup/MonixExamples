@@ -79,8 +79,14 @@ class Example_Execution_2_Cancelable extends FlatSpec with StrictLogging{
             c.orderedUpdate(Cancelable(() => println("Number #1")), order = 1)
         }
 
-        /*val termination: Future[Boolean] = */scheduler.awaitTermination(2.seconds /* ,global*/)  // awaitTermination 本身也是异步的
-        // Await.result(termination, Duration.Inf)
+        /**
+         * 注意，我们不能立刻 shutdown scheduler, 因为 shutdown 虽然不会终止正在执行的任务，但是会阻止新提交的任务
+         * 我们在 order=1 这个位置上延迟 1 秒钟提交的任务也会被阻止，因此我们需要先等待 2 秒钟，然后再终止
+         */
+        scheduler.awaitTermination(2.seconds) match {
+            case true => ???  // impossible to run to here
+            case false => scheduler.shutdown()
+        }
 
         /**
          * 关闭 OrderedCancelable 会看到 order 值较大的那个 Cancelable 被关闭
