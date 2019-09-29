@@ -5,7 +5,7 @@ import org.scalatest.FlatSpec
  * https://monix.io/docs/3x/tutorials/parallelism.html
  */
 
-class Example_1_parallelism extends FlatSpec with StrictLogging{
+class Example_Tutorials_1_Parallelism extends FlatSpec with StrictLogging{
     // On evaluation a Scheduler is needed
     import monix.execution.Scheduler.Implicits.global
 
