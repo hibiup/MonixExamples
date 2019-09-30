@@ -146,8 +146,8 @@ class Example_Execution_1_Scheduler extends FlatSpec with StrictLogging {
          * */
         lazy val executorService = scala.concurrent.ExecutionContext.Implicits.global
 
-        // UncaughtExceptionReporter 收集异步任务中的异常，打印到标准输出。（可选参数）
-        lazy val uncaughtExceptionReporter = UncaughtExceptionReporter(executorService.reportFailure)
+        // UncaughtExceptionReporter 收集异步任务中的异常，可以定制它的输出，比如输入到系统日志中。
+        lazy val uncaughtExceptionReporter = UncaughtExceptionReporter{ ex => logger.error(ex.getMessage, ex) }
 
         lazy val scheduler: Scheduler = Scheduler(
             scheduledExecutor, // （可选）

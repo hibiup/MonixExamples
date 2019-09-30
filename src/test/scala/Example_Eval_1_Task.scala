@@ -4,7 +4,8 @@ import monix.execution.Cancelable
 import org.scalatest.FlatSpec
 
 import scala.annotation.tailrec
-import scala.concurrent.Await
+import scala.concurrent.{Await, TimeoutException}
+import scala.util.Random
 
 class Example_Eval_1_Task extends FlatSpec with StrictLogging {
     import monix.execution.Scheduler.Implicits.global
@@ -64,6 +65,34 @@ class Example_Eval_1_Task extends FlatSpec with StrictLogging {
         cancelable.cancel()  //  销毁
     }
 
+    "Turn Seq[Task] to Task[Seq]" should "" in {
+        val ta = Task {
+            logger.info("Task 1 is running.")
+            1 }
+        val tb = Task {
+            logger.info("Task 2 is running.")
+            2 }
+
+        /*********
+         * Task.sequence 将 Seq[Task] 转换成 Task[Seq], 并保证执行和返回值的顺序
+         */
+        val orderedList: Task[Seq[Int]] = Task.sequence(Seq(ta, tb))
+        // We always get this ordering:
+        orderedList.runToFuture.foreach(v => logger.info(s"$v"))
+
+        /*********
+         * Task.gather 将 Seq[Task] 转换成 Task[Seq]但是不保证执行的顺序，但是保证返回值的顺序
+         */
+        val randomExecList: Task[Seq[Int]] = Task.gather(Seq(ta, tb))
+        randomExecList.runToFuture.foreach(v => logger.info(s"$v"))
+
+        /*********
+         * Task.gatherUnordered 不仅不保证执行的顺序，也不保证返回值的顺序
+         */
+        val unorderedlist: Task[Seq[Int]] = Task.gatherUnordered(Seq(ta, tb))
+        unorderedlist.runToFuture.foreach(v => logger.info(s"$v"))
+    }
+
     "executeAsync, executeOn" should "" in {
         /*******
          * 就像上面例子的说明，executeAsync 可以切换执行上下文的边界。
@@ -94,7 +123,7 @@ class Example_Eval_1_Task extends FlatSpec with StrictLogging {
            * executeOn 结束后会停留在 io ec 中, 但是如果 io 没有设置成 implicit 取代缺省的 global 的话，后续
            * 函数有可能不会继续使用它，而会切换回缺省的 ec
            * */
-          .doOnFinish(_ => Task{logger.info("doOnFinish task")})
+          .doOnFinish(_ => Task{logger.info("doOnFinish task")})  // doOnFinish 的一个非常有用的用途是用来关闭资源
           .runToFuture
           .foreach(v => logger.info(s"executeOn post process received: $v in `global` EC"))
     }
@@ -111,11 +140,27 @@ class Example_Eval_1_Task extends FlatSpec with StrictLogging {
          */
         result.foreach(println)
 
-
         /**
          * cancel 会销毁所有未被执行的任务（但是不会销毁正在执行的任务）
          */
         result.cancel()
+    }
+
+    "Task can race for each other" should "" in {
+        /**
+         * Task.racePair 返回两个 Task 中先执行完的那个结果
+         */
+        val ta = Task{1 + 1}
+        val tb = Task{10}
+
+        Task.racePair(ta, tb).runToFuture.foreach {
+            case Left((a, loser)) =>
+                logger.info(s"A succeeded: $a")
+                loser.cancel
+            case Right((loser, b)) =>
+                logger.info(s"B succeeded: $b")
+                loser.cancel
+        }
     }
 
     "Blocking eval task" should "" in {
@@ -190,7 +235,6 @@ class Example_Eval_1_Task extends FlatSpec with StrictLogging {
                 Task.now(b)
         }
         fib(100000).runToFuture.foreach(v => logger.info(s"fib returns: $v"))
-
     }
 
     "fromFuture" should "" in {
@@ -267,5 +311,52 @@ class Example_Eval_1_Task extends FlatSpec with StrictLogging {
                 // 如果执行了 executeAsync, 任务切换到另一个线程中，那么我们将会得到 Left 值，并且得到一个 future.
                 future.foreach(v => logger.info(s"Left value: $v"))
         }
+    }
+
+    "Task exception handler" should "" in {
+        /**
+         * 对于失败，可以通过 Task.runAsync 的回调来处理。
+         *
+         * 对于日志，可以通过定制 Scheduler 的 UncaughtExceptionReporter 参数来扑获
+         *
+         * 我们还可以用 onErrorHandleWith 让任务从失败中恢复：
+         */
+
+        val source = Task(throw new RuntimeException("Boom!"))
+
+        val recovered = source.onErrorHandleWith {
+            case _: RuntimeException =>
+                // Oh, we know about timeouts, recover it
+                Task.now("Recovered!")
+            case other =>
+                // 相比直接 throw exception 而言，raiseError 是一个更被推荐的方式。
+                Task.raiseError(other)
+        }
+
+        recovered.runToFuture.foreach(println)
+    }
+
+    "Task can be converted to Reactive Publisher" should "" in {
+        /**
+         * 定义一个任务，并将任务转换成 Publisher
+         */
+        val task = Task.eval(Random.nextInt())
+        val publisher: org.reactivestreams.Publisher[Int] = task.toReactivePublisher
+
+        /**
+         * 设置订阅者
+         */
+        import org.reactivestreams._
+        publisher.subscribe(new Subscriber[Int] {
+            def onSubscribe(s: Subscription): Unit = s.request(Long.MaxValue)
+            def onNext(e: Int): Unit = logger.info(s"OnNext: $e")
+            def onComplete(): Unit = logger.info("OnComplete")
+            def onError(ex: Throwable): Unit = logger.error(s"ERROR: ${ex.getMessage}", ex)
+        })
+
+        /**
+         * 执行（发布）任务
+         * */
+        task.runToFuture
     }
 }
