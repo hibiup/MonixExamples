@@ -8,6 +8,7 @@ import org.scalatest.FlatSpec
 class Example_Tutorials_1_Parallelism extends FlatSpec with StrictLogging{
     // On evaluation a Scheduler is needed
     import monix.execution.Scheduler.Implicits.global
+    import scala.concurrent.duration._
 
     // For Task
     import monix.eval.Task
@@ -127,5 +128,88 @@ class Example_Tutorials_1_Parallelism extends FlatSpec with StrictLogging{
         //=> 4999950000
 
         Thread.sleep(1000)
+    }
+
+    "flatMap and MergeMap" should "" in {
+        val source: Observable[Int] = Observable(2) ++ Observable(3, 4).delayExecution(50.millis)
+
+        /**
+         * mergeMap 接受上游输入，返回新的 Observable. 在本例中，上游先发送一个数字 2，然后间隔50毫秒。
+         * mergeMap 将数字 2 映射到一个新的间隔 50 毫秒送出 2A, 2B 队列的 Observable。之后 mergeMap 再次
+         * 接受到数字 3, 同样映射成 3A, 3B, 紧接着接受到 4 -> 4A, 4B, 由于 3A 到 4A 之间没有间隔限制，因此
+         * 被连续发送出去，然后 3B(相对于 3A 间隔 50 毫秒后)和 4B(相对于4A) 被发送出去。
+         *
+         * 这个例子演示了 mergeMap 具有合并 observable 的能力。当前后两个 Observable 的时间线存在重叠的时候
+         * 会被合并在一起。
+         */
+        val mergedStream: Observable[String] = {
+            source.mergeMap(i =>
+                Observable(
+                    s"mergeMap: [${Thread.currentThread.getName}] -> ${i}A",
+                    s"mergeMap: [${Thread.currentThread.getName}] -> ${i}B"
+                ).delayOnNext(50.millis)
+            )
+        }
+
+        mergedStream.foreachL(println).runToFuture
+        Thread.sleep(110)
+
+        /**
+         * 相比而言 flatMap 不具备合并 observable 的能力。因此当多个 observable 的时间线存在重叠的时候，
+         * 后一个 observable 不能被合并到前一个去，subscriber 必须按 observable 生成的顺序逐个消费。
+         *
+         * 例如本例虽然 4A 的产生时间早于 3B，但是订阅者也无法提前收到它，必须等到 （3A, 3B） 这个系列被消费掉之后
+         * 才接受到 (4A, 4B)
+         */
+        val flatStream: Observable[String] = {
+            source.flatMap(i =>
+                Observable(
+                    s"flatMap: [${Thread.currentThread.getName}] -> ${i}A",
+                    s"flatMap: [${Thread.currentThread.getName}] -> ${i}B"
+                ).delayOnNext(50.millis)
+            )
+        }
+
+        flatStream.foreachL(println).runToFuture
+        Thread.sleep(500)
+    }
+
+    "Error handler" should "" in {
+        import monix.reactive.Observable
+
+        val observable = Observable(1, 2, 3) ++ Observable.raiseError(new Exception("Boom!")) ++ Observable(0)
+
+        /**
+         * 当异常发生的时候 onErrorHandle 被调用
+         */
+        observable.onErrorHandle{ e =>
+            logger.info(e.getMessage)
+            4  // 将错误转换成 4
+        }.foreachL(println).runToFuture
+
+        /**
+         * 可以插入一个新的 Observable
+         */
+        observable
+                .onErrorHandleWith(_ => Observable(4, 5))
+                .foreachL(println).runToFuture
+
+        /**
+         * 也可以删除出错的数据
+         */
+        observable
+                .onErrorHandleWith(_ => Observable.unit)
+                .foreachL{
+                    case () => println(s"something has been dropped")
+                    case v => println(s"$v")
+                }.runToFuture
+
+        Thread.sleep(100)
+    }
+
+    "Subjects has dual-way message sending ability" should "" in {
+        /**
+         * Subjects
+         */
     }
 }
