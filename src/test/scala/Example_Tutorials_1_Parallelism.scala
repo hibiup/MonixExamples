@@ -174,6 +174,29 @@ class Example_Tutorials_1_Parallelism extends FlatSpec with StrictLogging{
         Thread.sleep(500)
     }
 
+    "switchMap" should "" in {
+        /**
+         * 和 mergeMap 不同，switchMap 不合并两个 Observable，而是用后一个覆盖前一个：
+         */
+        import cats.effect.ExitCase
+
+        def child(i: Int): Observable[String] = {
+            Observable(s"${i}A", s"${i}B", s"${i}C")
+              .delayOnNext(50.millis)
+              .guaranteeCase {
+                  case ExitCase.Completed => Task(println(s"$i: Request has been completed."))
+                  case ExitCase.Error(e) => Task(println(s"$i: Request has encountered an error."))
+                  case ExitCase.Canceled => Task(println(s"$i: Request has been canceled."))
+              }
+        }
+
+        Observable(2, 3, 4).delayOnNext(100.millis)
+          .switchMap(child)
+          .foreachL(println).runToFuture
+
+        Thread.sleep(1000)
+    }
+
     "Error handler" should "" in {
         import monix.reactive.Observable
 
