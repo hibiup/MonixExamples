@@ -145,18 +145,20 @@ class Example_Reactive_1_Observable extends FlatSpec with StrictLogging{
          * 定义一个循环任务 Task，它将工作在即将定义的 Observable 的内部，这个函数将 Observable 的订阅者作（subscriber）为参数，
          * 每间隔一段时间产出一个(递增的)数字交给 subscriber（通过 onNext 回调）.
          *
-         * Subscriber 是一个 Observer 的实现，它观察 Observable 的产出值。
+         * Observer 只是 Publisher 和 Consumer 之间的回调界面，详细介绍参考：https://monix.io/docs/3x/reactive/observers.html#observer
+         *
+         * Subscriber 是一个 Observer 的实现（并且其内部绑定了一个缺省的 Scheduler），它通过 Observer 定义的函数接口观察 Observable 的产出值。
          */
         def producerLoop(sub: Subscriber[Int], n: Int = 0): Task[Unit] = {
             /**
-             *  onNext 是 Observer(subscriber) 定义给 Observable 的用于接收数据的回调窗口。参数就 Observable 传递给订阅者的值，
+             *  onNext 是 Observer(Subscriber) 定义给 Observable 的用于接收数据的回调窗口。参数就 Observable 传递给订阅者的值，
              *  onNext 返回 Future[Ack] 给 Observable 来告诉它 subscriber 的下一步状态，以便 Observable 决定是否继续发送数据。
              */
             Task.deferFuture(sub.onNext(n))
                     .delayExecution(100.millis)  // 只是延迟一下计算
                     .flatMap {
                         /**
-                         * subscriber 的 onNext 返回一个 Task[Ack] 类型。 Ack 是一个专门作为信号的类型，
+                         * Subscriber 的 onNext 返回一个 Task[Ack] 类型。 Ack 是一个专门作为信号的类型，
                          * 它包含两个子类型：Continue 和 Stop，分别表"继续"还是"结束"。可以被用于循环控制
                          */
                         case Ack.Continue => producerLoop(sub, n + 1)
