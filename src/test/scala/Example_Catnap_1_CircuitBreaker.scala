@@ -25,11 +25,12 @@ class Example_Catnap_1_CircuitBreaker extends FlatSpec with StrictLogging{
         import monix.catnap.CircuitBreaker
         import monix.eval._
         import scala.concurrent.duration._
+        import monix.execution.Scheduler.Implicits.global
 
         /**
          * 1）定义一个断路器，以允许对 Task 进行服务管理。（注意，断路器本身也是由 Task 实现的。）
          */
-        val circuitBreaker: Task[CircuitBreaker[Task]] = {
+        val circuitBreaker: CircuitBreaker[Task] = {
             val resetTimeout = 2
             CircuitBreaker[Task].of(
                 maxFailures = 1, // 允许的最大失败次数
@@ -53,7 +54,7 @@ class Example_Catnap_1_CircuitBreaker extends FlatSpec with StrictLogging{
                     logger.info(s"Switched to Open, all incoming tasks rejected for the next ${resetTimeout} seconds")
                 }
             )
-        }
+        }.runSyncUnsafe()  // 生成断路器
 
 
         /**
@@ -66,25 +67,19 @@ class Example_Catnap_1_CircuitBreaker extends FlatSpec with StrictLogging{
         }
 
         /**
-         * 测试：
+         * 3) 将问题任务置于断路器保护之下。返回一个代理
          */
-        import monix.execution.Scheduler.Implicits.global
-        circuitBreaker.map{ ci =>
-            /**
-             * 将问题任务置于断路器保护之下
-             */
-            def protectedTask(i:Int): Task[Int] = ci.protect(problematicTask(i))
+        def protectedTask(i:Int): Task[Int] = circuitBreaker.protect(problematicTask(i))
 
-            /**
-             * 多次调用保护器
-             * */
-            for (i <- Range(0, 15)){
-                protectedTask(i).runAsync{
-                    case Right(n) => logger.info(s"Task return: $n")
-                    case Left(t) => logger.info(s"Task failed by ${t.getMessage}")
-                }
-                Thread.sleep(1000)
+        /**
+         * 4) 多次调用被保护的代理
+        * */
+        for (i <- Range(0, 15)){
+            protectedTask(i).runAsync{
+                case Right(n) => logger.info(s"Task return: $n")
+                case Left(t) => logger.info(s"Task failed by ${t.getMessage}")
             }
-        }.runToFuture
+            Thread.sleep(1000)
+        }
     }
 }
