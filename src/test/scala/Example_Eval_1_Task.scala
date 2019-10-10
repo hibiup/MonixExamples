@@ -98,9 +98,15 @@ class Example_Eval_1_Task extends FlatSpec with StrictLogging {
          * 就像上面例子的说明，executeAsync 可以切换执行上下文的边界。
          */
         Task{
-            logger.info("Task is running in executeAsync mode will be shift to `global` pool.")
+            logger.info("Task is running in executeAsync mode will shifts to `global` pool.")
             1 + 1
         }.executeAsync.runToFuture
+
+        import cats.implicits._
+        (Task.shift *> Task{
+            logger.info("Task.shift is doing the same to executeAsync which also shifts job to `global` pool.")
+            1 + 1
+        }).runToFuture
 
         Task{
             logger.info("Task is running in `main` thread context.")
